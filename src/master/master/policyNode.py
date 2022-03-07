@@ -7,9 +7,8 @@ import rclpy
 from rclpy.node import Node
 
 from master_interfaces.msg import GripperStatus   
-from master_interfaces.msg import GripperPos    
-from master_interfaces.msg import RobotStatus    
-from master_interfaces.msg import RobotPos   
+from master_interfaces.msg import GripperPos     
+from sunrisedds_interfaces.msg import JointPosition
 
 import numpy as np
 import time
@@ -38,8 +37,8 @@ class PublishingSubscriber(Node):
             1)                                          #queue size
         
         self.subscription2 = self.create_subscription(
-            RobotStatus,
-            'robot_status',
+            JointPosition,
+            'state',
             self.robot_listener_callback,
             1)
         
@@ -48,7 +47,7 @@ class PublishingSubscriber(Node):
 
         # Set up publisher to gripper and robot pos
         self.publisher_ = self.create_publisher(GripperPos, 'gripper_pos', 1)
-        self.publisher2 = self.create_publisher(RobotPos, 'robot_pos',1)
+        self.publisher2 = self.create_publisher(JointPosition, 'command',1)
         timer_period = 2  # seconds
         self.timer = self.create_timer(
             timer_period, 
@@ -56,20 +55,21 @@ class PublishingSubscriber(Node):
         self.i = 0
 
         np.set_printoptions(formatter={'float': lambda x: "{0:0.2f}".format(x)})
-        self.current_status = np.empty(15, np.float)
+        
+        self.current_status = np.empty(8, np.float)
 
     def gripper_listener_callback(self, msg): #gripper_callback
-        self.current_status[14] = float(msg.status)
+        self.current_status[7] = float(msg.status)
         #print(self.current_status)
         #self.get_logger().info('I heard: "%s"' % msg)
 
 
     def robot_listener_callback(self, msg): #full_callback
-        msg_vector = np.array([msg.joint1, msg.joint2, msg.joint3, msg.joint4, msg.joint5,
-        msg.joint6, msg.joint7, msg.x, msg.y, msg.z, msg.a, msg.b, msg.c, float(msg.running)])
-        self.current_status[:14] = msg_vector
+        msg_vector = np.array([msg.position.a1, msg.position.a2, msg.position.a3, msg.position.a4, msg.position.a5,
+        msg.position.a6, msg.position.a7])
+        self.current_status[:7] = msg_vector
         print("current_status",self.current_status)
-        print("\n")
+        #print("\n")
 
             
     def talker_callback(self): # Member function that makes the gripper_status information
@@ -80,18 +80,17 @@ class PublishingSubscriber(Node):
         msg = GripperPos()
         msg.pos = int(chosen_action[7])
         
-        msg2 = RobotPos()
-        msg2.joint1 = chosen_action[0]
-        msg2.joint2 = chosen_action[1]
-        msg2.joint3 = chosen_action[2]
-        msg2.joint4 = chosen_action[3]
-        msg2.joint5 = chosen_action[4]
-        msg2.joint6 = chosen_action[5]
-        msg2.joint7 = chosen_action[6]
+        msg2 = JointPosition()
+        msg2.position.a1 = chosen_action[0]
+        msg2.position.a2 = chosen_action[1]
+        msg2.position.a3 = chosen_action[2]
+        msg2.position.a4 = -chosen_action[3]
+        msg2.position.a5 = chosen_action[4]
+        msg2.position.a6 = chosen_action[5]
+        msg2.position.a7 = chosen_action[6]
 
         self.publisher_.publish(msg)
         self.publisher2.publish(msg2)
-        
         print(msg, "\n", msg2)
         #self.get_logger().info('Publishing: "%s"' % msg.pos)
         self.i += 1

@@ -9,7 +9,7 @@ from master_interfaces.msg import GripperPos                           # CHANGE
 import time
 from robotiq_modbus_controller.driver import RobotiqModbusRtuDriver
 
-gripperConnected = False
+gripperConnected = True
 
 class PublishingSubscriber(Node):
 
@@ -31,7 +31,6 @@ class PublishingSubscriber(Node):
         self.i = 0
 
         if gripperConnected:
-            print("jepppppppppp")
             device = "/dev/ttyUSB1" # Name of USB port for gripper
             self.driver = RobotiqModbusRtuDriver(device)# Make a class that comes with the robotiq_modbus_controller python package.
             self.driver.connect() # Connect to gripper
