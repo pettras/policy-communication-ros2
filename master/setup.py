@@ -30,6 +30,8 @@ setup(
             'actionNode = master.actionNode:main',
             'gripperNode = master.gripperNode:main',
             'policyNode = master.policyNode:main',
+            'cameraNode = master.cameraNode:main',
+
 
         ],
     },
