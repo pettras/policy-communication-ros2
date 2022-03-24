@@ -56,7 +56,9 @@ def capturePoints():
 
 def reshape_image_2d(img):
     new_img = np.reshape(img, (1200,1944,4)) #(1200,1944,4)
-    new_img = cv2.resize(new_img, dsize=(256, 256), interpolation=cv2.INTER_CUBIC)
+    #new_img = cv2.resize(new_img, dsize=(256, 256), interpolation=cv2.INTER_CUBIC)
+    new_img = new_img[0:1200, 372:1572]
+    new_img = cv2.resize(new_img, dsize=(256, 256), interpolation=cv2.INTER_CUBIC) #USE WITH CAUTION, may interferre with the pixel size
     new_img = np.delete(new_img, 3, axis=2)
     return new_img
 
@@ -107,17 +109,7 @@ class PublishingSubscriber(Node):
         self.timer = self.create_timer(
             1, 
             self.check_movement)
-        """
-        timer_period = 0.5  # seconds
-        self.timer = self.create_timer(
-            timer_period, 
-            self.capture_image) #Takes a picture 1 second before the talker_callback is ran (did not work)
-        time.sleep(1)
-        self.timer = self.create_timer(
-            timer_period, 
-            self.talker_callback) #sends gripper pos accorting to timer
-        self.i = 0
-        """
+
         
         np.set_printoptions(formatter={'float': lambda x: "{0:0.2f}".format(x)})
         self.current_status = np.empty(8, np.float)
@@ -144,10 +136,12 @@ class PublishingSubscriber(Node):
 
         print("TEST: PREV", self.prev_status)
         print("TEST: CUR", self.current_status)
-        if np.around(self.prev_status,2).all() == np.around(self.current_status,2).all():
+        if np.around(self.prev_status,3).all() == np.around(self.current_status,3).all(): #check that the robot is not moving
             self.capture_image()
+
             self.prev_status=self.current_status
-            self.talker_callback()
+
+            self.set_new_goal()
 
 
 
@@ -159,25 +153,22 @@ class PublishingSubscriber(Node):
 
     def gripper_listener_callback(self, msg): #gripper_callback
         self.current_status[7] = float(msg.status)
-        self.get_logger().info('I heard: "%s"' % msg)
+        #self.get_logger().info('I heard: "%s"' % msg)
 
 
     def robot_listener_callback(self, msg): #full_callback
         msg_vector = np.array([msg.position.a1, msg.position.a2, msg.position.a3, msg.position.a4, msg.position.a5,
         msg.position.a6, msg.position.a7])
         self.current_status[:7] = msg_vector
-        print("current_status",self.current_status)
+        #print("current_status",self.current_status)
     
     def zivid_image_callback(self, msg):
         self.current_image = msg.data
 
 
         
-    def talker_callback(self): # Member function that makes the gripper_status information
-        joint_states = self.current_status[:7]
-
-        print("halla", joint_states)
-        
+    def set_new_goal(self): 
+        joint_states = self.current_status[:7]        
         image_state = reshape_image_2d(self.current_image)
 
         #print(image_state)
@@ -195,7 +186,14 @@ class PublishingSubscriber(Node):
 
         
         msg = GripperPos()
-        msg.pos = 0
+        if self.test == 10:
+            self.test = 0
+        if self.test > 5:
+            msg.pos = 0
+        elif self.test <= 5:
+            msg.pos = 1
+        self.test += 1
+
         msg2 = JointPosition()
         msg2.position.a1 = chosen_action_joints[0]
         msg2.position.a2 = chosen_action_joints[1]
@@ -204,7 +202,7 @@ class PublishingSubscriber(Node):
         msg2.position.a5 = chosen_action_joints[4]
         msg2.position.a6 = chosen_action_joints[5]
         msg2.position.a7 = chosen_action_joints[6]
-        print("test1", chosen_action_joints[0].dtype)
+        #print("test1", chosen_action_joints[0].dtype)
         
 
 

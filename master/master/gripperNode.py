@@ -49,7 +49,7 @@ class PublishingSubscriber(Node):
         print(self.current_pos_request)
         #self.get_logger().info('I heard: "%s"' % msg)
         if gripperConnected:
-            self.driver.move(pos = self.current_pos_request, speed = 100, force = 10)
+            self.driver.move(pos = self.current_pos_request, speed = 150, force = 10)
             time.sleep(2)
             
     def talker_callback(self): # Member function that makes the gripper_status information
