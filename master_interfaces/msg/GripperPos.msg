@@ -1,1 +1,1 @@
-uint16 pos
+float32 pos

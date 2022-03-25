@@ -22,6 +22,16 @@ from sensor_msgs.msg import Image, PointCloud2
 from zivid_interfaces.srv import Capture2D, Capture 
 import matplotlib.pyplot as plt
 
+import sys
+sys.path.insert(0, '/home/kukauser/Robot_Learning_master/code')
+from src.models.robots.manipulators.iiwa_14_robot import IIWA_14
+from src.models.grippers.robotiq_85_iiwa_14_gripper import Robotiq85Gripper_iiwa_14
+from src.helper_functions.register_new_models import register_gripper, register_robot_class_mapping
+from src.environments import Lift_4_objects, Lift_edit
+
+from robosuite.environments.base import register_env
+from robosuite.models.robots.robot_model import register_robot
+
 import cv2
 
 # Function that makes a client node, calls a capture signal til the Zivid server and closes the node.
@@ -57,9 +67,9 @@ def capturePoints():
 def reshape_image_2d(img):
     new_img = np.reshape(img, (1200,1944,4)) #(1200,1944,4)
     #new_img = cv2.resize(new_img, dsize=(256, 256), interpolation=cv2.INTER_CUBIC)
-    new_img = new_img[0:1200, 372:1572]
-    new_img = cv2.resize(new_img, dsize=(256, 256), interpolation=cv2.INTER_CUBIC) #USE WITH CAUTION, may interferre with the pixel size
-    new_img = np.delete(new_img, 3, axis=2)
+    #new_img = new_img[0:1200, 372:1572]
+    new_img = cv2.resize(new_img, dsize=(486, 300), interpolation=cv2.INTER_CUBIC) #USE WITH CAUTION, may interferre with the pixel size
+    new_img = np.delete(new_img, 3, axis=2) #delete 4th dimension
     return new_img
 
 
@@ -117,13 +127,19 @@ class PublishingSubscriber(Node):
         self.test = 0
         
         #Load trained model
-        self.model=PPO.load("/home/kukauser/Downloads/dummy_policy_256_256")
+        self.model=PPO.load("/home/kukauser/petter/zip_files/best_model") #/home/kukauser/Downloads/dummy_policy_256_256") #/home/kukauser/petter/zip_files/best_model
+
+        register_robot(IIWA_14)
+        register_gripper(Robotiq85Gripper_iiwa_14)
+        register_robot_class_mapping("IIWA_14")
+        register_env(Lift_edit)
+        register_env(Lift_4_objects)
         
         #Set up the Robosuite environment
         self.env = suite.make(
-            env_name="Lift", # try with other tasks like "Stack" and "Door"
-            robots="IIWA",  # try with other robots like "Sawyer" and "Jaco"
-            gripper_types="Robotiq85Gripper",
+            env_name="Lift_edit", # try with other tasks like "Stack" and "Door"
+            robots="IIWA_14",  # try with other robots like "Sawyer" and "Jaco"
+            gripper_types="Robotiq85Gripper_iiwa_14",
             has_renderer=False,
             has_offscreen_renderer=False,
             use_camera_obs=False,
@@ -134,8 +150,8 @@ class PublishingSubscriber(Node):
     def check_movement(self):
 
 
-        print("TEST: PREV", self.prev_status)
-        print("TEST: CUR", self.current_status)
+        #print("TEST: PREV", self.prev_status)
+        #print("TEST: CUR", self.current_status)
         if np.around(self.prev_status,3).all() == np.around(self.current_status,3).all(): #check that the robot is not moving
             self.capture_image()
 
@@ -170,29 +186,36 @@ class PublishingSubscriber(Node):
     def set_new_goal(self): 
         joint_states = self.current_status[:7]        
         image_state = reshape_image_2d(self.current_image)
+        image_state = cv2.rotate(image_state, cv2.ROTATE_180)
+        k = cv2.imwrite(r'/home/kukauser/Downloads/k.png', cv2.cvtColor(image_state,cv2.COLOR_RGB2BGR))
 
         #print(image_state)
-        k = cv2.imwrite(r'/home/kukauser/Downloads/k.png', cv2.cvtColor(image_state,cv2.COLOR_RGB2BGR))
+        #k = cv2.imwrite(r'/home/kukauser/Downloads/k.png', cv2.cvtColor(image_state,cv2.COLOR_RGB2BGR))
       
         obs_states = {}
-        obs_states['calibrated_camera_image']=image_state
-        obs_states['robot0_joint_pos']=joint_states
+        obs_states['custom_image']=image_state
+        
+        #For dummy PPO:
+        #obs_states['calibrated_camera_image']=image_state
+        #obs_states['robot0_joint_pos']=joint_states
         
         chosen_action_pose = self.model.predict(obs_states)
         print("chosen action pose",chosen_action_pose)
         obs = self.env.step(chosen_action_pose[0])
-        chosen_action_joints = obs[0]['robot0_joint_pos']*0.8
+        chosen_action_joints = obs[0]['robot0_joint_pos']*0.8 #Why 0.8??????
         print("chosen action joints", chosen_action_joints)
 
         
         msg = GripperPos()
-        if self.test == 10:
-            self.test = 0
-        if self.test > 5:
-            msg.pos = 0
-        elif self.test <= 5:
-            msg.pos = 1
-        self.test += 1
+        #if self.test == 10:
+        #    self.test = 0
+        #if self.test > 5:
+        #    msg.pos = 0
+        #elif self.test <= 5:
+        #    msg.pos = 1
+        #self.test += 1
+        print("NEW TEST:", type(float(chosen_action_pose[0][-1])))
+        msg.pos=float(chosen_action_pose[0][-1])
 
         msg2 = JointPosition()
         msg2.position.a1 = chosen_action_joints[0]

@@ -42,7 +42,7 @@ class PublishingSubscriber(Node):
             time.sleep(2) # A pause to make sure that the gripper is fully reset before getting a command
 
     def listener_callback(self, msg): # Member function that handles the use of gripper_pos information
-        if msg.pos==1:
+        if msg.pos<0:
             self.current_pos_request = 255
         else:
             self.current_pos_request = 0
