@@ -46,7 +46,7 @@ save_image = True
 #crop_image = False
 
 
-max_robot_movement = 0.8
+max_robot_movement = 0.5
 policy_model_path = "/home/kukauser/petter/zip_files/best_model" #/home/kukauser/Downloads/dummy_policy_256_256") #/home/kukauser/petter/zip_files/best_model
 
 
@@ -123,7 +123,8 @@ class PublishingSubscriber(Node):
         )
 
         #TEST SECTION
-        self.simulated_eef_state = None
+        self.simulated_eef_state = np.zeros(6)
+        self.simulated_joint_state = np.zeros(7)
         
     def check_movement(self):
         #print("TEST: PREV", self.prev_status)
@@ -166,20 +167,21 @@ class PublishingSubscriber(Node):
         obs_states = {}
         if image_observation:
             obs_states['custom_image']=image_state #image name in dummy PPO: 'calibrated_camera_image'
-        if eef_observation:
-            obs_states['robot0_eef_pos']=self.simulated_eef_state 
+        #if eef_observation:
+        #    obs_states['robot0_eef_pos']=self.simulated_eef_state 
         if joint_observation: #as in dummy_PPO
             obs_states['robot0_joint_pos']=joint_states
-        if gripper_observation:
+        #if gripper_observation:
             # ... = current_status[7]
         
+
         #Test i joint states from robosuite and physical robot is the same (should be)
         physical_joint_state = joint_states #(a1,a2,a3,a4,a5,a6,a7)
-        simulated_joint_state = obs[0]['robot0_joint_pos'] #(a1,a2,a3,a4,a5,a6,a7)
-        print("physical_joint_state:", physical_joint_state, "\n")
-        print("simulated_joint_state", simulated_joint_state, "\n")
+        print("physical_joint_state:", physical_joint_state)
+        print("simulated_joint_state", self.simulated_joint_state, "\n")
+        print("simulated_eef_state", self.simulated_joint_state, "\n")
+       
 
-        
         #The policy choose the next action (x,y,z,a,b,c) based on the observations
         chosen_action_pose = self.policy_model.predict(obs_states)
         print("chosen action pose",chosen_action_pose)
@@ -190,6 +192,8 @@ class PublishingSubscriber(Node):
 
         #Test if the eef_pos can be taken from the robosuite environment
         self.simulated_eef_state = obs[0]['robot0_eef_pos'] #(x,y,z)
+        #Test i joint states from robosuite and physical robot is the same (should be)
+        self.simulated_joint_state = obs[0]['robot0_joint_pos'] #(a1,a2,a3,a4,a5,a6,a7)
 
         
         gripper_msg = GripperPos()
