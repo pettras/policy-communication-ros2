@@ -1,1 +1,2 @@
-uint8 status
+int8 closed
+int8 movement

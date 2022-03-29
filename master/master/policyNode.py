@@ -33,26 +33,23 @@ from robosuite.environments.base import register_env
 from robosuite.models.robots.robot_model import register_robot
 
 import cv2
-np.set_printoptions(formatter={'float': lambda x: "{0:0.2f}".format(x)})
+from math import isclose
+np.set_printoptions(formatter={'float': lambda x: "{0:0.4f}".format(x)})
 
 
 image_observation = True
-eef_observation = True
+eef_observation = False
 joint_observation = False
-gripper_observation = True
+gripper_observation = False
 
 #images_size = (486, 300)
 save_image = True
 #crop_image = False
 
 
-max_robot_movement = 0.5
+test_robot_movement_mode = True
+
 policy_model_path = "/home/kukauser/petter/zip_files/best_model" #/home/kukauser/Downloads/dummy_policy_256_256") #/home/kukauser/petter/zip_files/best_model
-
-
-#gripper_connected = True
-#robot_connected = True
-#camera_connected = True
 
 
 
@@ -94,13 +91,18 @@ class PublishingSubscriber(Node):
         
         #Check for movement
         self.timer = self.create_timer(
-            1, 
+            0.5, 
             self.check_movement)
 
-        #Create arrays for collection current and previous status of robot and gripper
-        self.current_status = np.empty(8, np.float)
-        self.prev_status = np.empty(8, np.float)
-        
+        #Create arrays for collection of physical and simulated robot and gripper data
+        self.gripper_movement = 0
+        self.simulated_eef_state = np.zeros(6)
+        self.simulated_joint_state = np.zeros(7)
+        self.physical_joint_state = np.zeros(7)
+        self.physical_gripper_state = 0
+        self.first_runthrough=1
+        #Should have a simulated_gripper_state
+
         #Load trained model
         self.policy_model=PPO.load(policy_model_path)
 
@@ -122,16 +124,15 @@ class PublishingSubscriber(Node):
             controller_configs=load_controller_config(default_controller="OSC_POSE"),
         )
 
-        #TEST SECTION
-        self.simulated_eef_state = np.zeros(6)
-        self.simulated_joint_state = np.zeros(7)
+
         
     def check_movement(self):
-        #print("TEST: PREV", self.prev_status)
-        #print("TEST: CUR", self.current_status)
-        if np.around(self.prev_status,3).all() == np.around(self.current_status,3).all(): #check that the robot is not moving
+
+        print("TEST: phy", self.simulated_joint_state)
+        print("TEST: sim", self.physical_joint_state)
+
+        if (np.allclose(self.simulated_joint_state, self.physical_joint_state, atol=0.0001) and self.gripper_movement==0 ) or self.first_runthrough==1:#check that the robot is not moving
             self.capture_image()
-            self.prev_status=self.current_status
             self.set_new_goal()
 
 
@@ -139,15 +140,16 @@ class PublishingSubscriber(Node):
         capture2D()
 
     def gripper_current_status(self, msg): #gripper_callback
-        self.current_status[7] = float(msg.status)
+        self.physical_gripper_state = float(msg.closed)
+        self.gripper_movement = msg.movement
         #self.get_logger().info('I heard: "%s"' % msg)
 
 
     def robot_current_status(self, msg): #full_callback
         msg_vector = np.array([msg.position.a1, msg.position.a2, msg.position.a3, msg.position.a4, msg.position.a5,
         msg.position.a6, msg.position.a7])
-        self.current_status[:7] = msg_vector
-        #print("current_status",self.current_status)
+        self.physical_joint_state = msg_vector
+        
     
     def zivid_image_callback(self, msg):
         self.current_image = msg.data
@@ -155,9 +157,7 @@ class PublishingSubscriber(Node):
 
         
     def set_new_goal(self): 
-        #Get the current state from robot and image
-        joint_states = self.current_status[:7]
-        #gripper_state = self.current_status[7]        
+        #gripper_state = self.physical_gripper_state        
         image_state = reshape_image_2d(self.current_image)
 
         if save_image:
@@ -166,54 +166,65 @@ class PublishingSubscriber(Node):
         #OBSERVATION SPACE
         obs_states = {}
         if image_observation:
-            obs_states['custom_image']=image_state #image name in dummy PPO: 'calibrated_camera_image'
-        #if eef_observation:
-        #    obs_states['robot0_eef_pos']=self.simulated_eef_state 
-        if joint_observation: #as in dummy_PPO
-            obs_states['robot0_joint_pos']=joint_states
-        #if gripper_observation:
-            # ... = current_status[7]
-        
+            obs_states['custom_image']=image_state                      #image name in dummy PPO: 'calibrated_camera_image'
+        if joint_observation:                                           #as in dummy_PPO. Cant see why this is useful
+            obs_states['robot0_joint_pos']=self.physical_joint_state
+        """
+        if eef_observation:
+            obs_states['robot0_eef_pos']=self.simulated_eef_state 
+        if hight_observation:
+            obs_states['robot0_eef_z']=self.simulated_eef_z_state
+        if gripper_observation:
+            obs_states['robot0_gripper_state']=self.physical or simulated gripper state.
+        """
 
         #Test i joint states from robosuite and physical robot is the same (should be)
-        physical_joint_state = joint_states #(a1,a2,a3,a4,a5,a6,a7)
-        print("physical_joint_state:", physical_joint_state)
+        print("physical_joint_state:", self.physical_joint_state)
         print("simulated_joint_state", self.simulated_joint_state, "\n")
-        print("simulated_eef_state", self.simulated_joint_state, "\n")
+        print("simulated_eef_state", self.simulated_eef_state, "\n")
        
 
         #The policy choose the next action (x,y,z,a,b,c) based on the observations
         chosen_action_pose = self.policy_model.predict(obs_states)
-        print("chosen action pose",chosen_action_pose)
+        print("chosen action pose",chosen_action_pose) 
         #Robosuite translates the action (x,y,z,a,b,c) to joint angles (a1,a2,a3,a4,a5,a6,a7)
         obs = self.robosuite_env.step(chosen_action_pose[0])
-        chosen_action_joints = obs[0]['robot0_joint_pos']*max_robot_movement #Will be innaccurate if max_robot_movement != 1
-        print("chosen action joints", chosen_action_joints)
+        self.simulated_joint_state = obs[0]['robot0_joint_pos']
+        print("chosen action joints", self.simulated_joint_state)
+
+        if test_robot_movement_mode:
+            self.simulated_joint_state[3] = -1.5
+        
+        test_limits(self.simulated_joint_state)
 
         #Test if the eef_pos can be taken from the robosuite environment
         self.simulated_eef_state = obs[0]['robot0_eef_pos'] #(x,y,z)
-        #Test i joint states from robosuite and physical robot is the same (should be)
-        self.simulated_joint_state = obs[0]['robot0_joint_pos'] #(a1,a2,a3,a4,a5,a6,a7)
 
-        
-        gripper_msg = GripperPos()
-        gripper_msg.pos=float(chosen_action_pose[0][-1]) #gripper action directly from policy
+        gripper_msg= GripperPos()
+        if float(chosen_action_pose[0][-1]) > 0 :
+            gripper_msg.pos = 1.0 #close gripper
+        else:
+            gripper_msg.pos = 0.0 #open gripper
 
         robot_msg = JointPosition()
-        robot_msg.position.a1 = chosen_action_joints[0] #joint action taken from robosuite
-        robot_msg.position.a2 = chosen_action_joints[1]
-        robot_msg.position.a3 = chosen_action_joints[2]
-        robot_msg.position.a4 = chosen_action_joints[3]
-        robot_msg.position.a5 = chosen_action_joints[4]
-        robot_msg.position.a6 = chosen_action_joints[5]
-        robot_msg.position.a7 = chosen_action_joints[6]
-        #print("test1", chosen_action_joints[0].dtype)
-        
+        robot_msg.position.a1 = self.simulated_joint_state[0] #joint action taken from robosuite
+        robot_msg.position.a2 = self.simulated_joint_state[1]
+        robot_msg.position.a3 = self.simulated_joint_state[2]
+        robot_msg.position.a4 = self.simulated_joint_state[3]
+        robot_msg.position.a5 = self.simulated_joint_state[4]
+        robot_msg.position.a6 = self.simulated_joint_state[5]
+        robot_msg.position.a7 = self.simulated_joint_state[6]
+        #print("test1", self.simulated_joint_state[0].dtype)
 
+
+
+        
         self.publisher_gripper.publish(gripper_msg)
         self.publisher_robot.publish(robot_msg)
         print(gripper_msg, "\n", robot_msg)
         #self.get_logger().info('Publishing: "%s"' % msg.pos)
+
+        self.first_runthrough=0
 
     
 # Function that makes a client node, calls a capture signal til the Zivid server and closes the node.
@@ -243,6 +254,15 @@ def reshape_image_2d(img):
     new_img = cv2.rotate(new_img, cv2.ROTATE_180)
 
     return new_img
+
+def test_limits(joint_angles):
+    assert -2.9 < joint_angles[0] < 2.9, "Joint 1 out of bounds"
+    assert -1.91 < joint_angles[1] < 1.91, "Joint 2 out of bounds"
+    assert -2.9 < joint_angles[2] < 2.9, "Joint 3 out of bounds"
+    assert -1.9 < joint_angles[3] < 1.9, "Joint 4 out of bounds"
+    assert -2.9 < joint_angles[4] < 2.9, "Joint 5 out of bounds"
+    assert -1.9 < joint_angles[5] < 1.9, "Joint 6 out of bounds"
+    assert -2.9 < joint_angles[6] < 2.9, "Joint 7 out of bounds"
 
 
 def main(args=None):
