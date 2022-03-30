@@ -19,6 +19,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/GripperStatus.msg"
   "msg/RobotPos.msg"
   "msg/GripperPos.msg"
+  "msg/CalibrationTrigger.msg"
  )
  
 # -------------------

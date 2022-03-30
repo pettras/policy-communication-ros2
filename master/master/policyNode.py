@@ -19,7 +19,7 @@ import robosuite as suite
 from robosuite import load_controller_config
 
 from sensor_msgs.msg import Image, PointCloud2 
-from zivid_interfaces.srv import Capture2D, Capture 
+from zivid_interfaces.srv import Capture 
 import matplotlib.pyplot as plt
 
 import sys
@@ -229,19 +229,18 @@ class PublishingSubscriber(Node):
     
 # Function that makes a client node, calls a capture signal til the Zivid server and closes the node.
 # Copied from zivid-ros2/zivid_samples/zivid_samples/sample_capture.py
-def capture2D():
+def capture():
     node = rclpy.create_node("zivid_camera_client")
 
-    capture_client = node.create_client(Capture2D, "/zivid/capture_2d") 
+    capture_client = node.create_client(Capture, "/zivid/capture")
     while not capture_client.wait_for_service(timeout_sec=1.0):
         print("service not available, waiting again...")
 
-    request = Capture2D.Request() 
+    request = Capture.Request()
     future = capture_client.call_async(request)
-    #print(future)
-    response = Capture2D.Response()
-    #print(response)
-    node.destroy_node()
+    response = Capture.Response()    
+    node.destroy_node()    
+
 
 
 
