@@ -19,7 +19,7 @@ import robosuite as suite
 from robosuite import load_controller_config
 
 from sensor_msgs.msg import Image, PointCloud2 
-from zivid_interfaces.srv import Capture 
+from zivid_interfaces.srv import Capture, Capture2D
 import matplotlib.pyplot as plt
 
 import sys
@@ -38,9 +38,9 @@ np.set_printoptions(formatter={'float': lambda x: "{0:0.4f}".format(x)})
 
 
 image_observation = True
-eef_observation = False
+eef_observation = True
 joint_observation = False
-gripper_observation = False
+gripper_observation = True
 
 #images_size = (486, 300)
 save_image = True
@@ -49,7 +49,7 @@ save_image = True
 
 test_robot_movement_mode = True
 
-policy_model_path = "/home/kukauser/petter/zip_files/best_model" #/home/kukauser/Downloads/dummy_policy_256_256") #/home/kukauser/petter/zip_files/best_model
+policy_model_path = "/home/kukauser/petter/zip_files/best_success_rate" #/home/kukauser/Downloads/dummy_policy_256_256") #/home/kukauser/petter/zip_files/best_model
 
 
 
@@ -96,7 +96,7 @@ class PublishingSubscriber(Node):
 
         #Create arrays for collection of physical and simulated robot and gripper data
         self.gripper_movement = 0
-        self.simulated_eef_state = np.zeros(6)
+        self.simulated_eef_pos = np.zeros(3)
         self.simulated_joint_state = np.zeros(7)
         self.physical_joint_state = np.zeros(7)
         self.physical_gripper_state = 0
@@ -157,7 +157,6 @@ class PublishingSubscriber(Node):
 
         
     def set_new_goal(self): 
-        #gripper_state = self.physical_gripper_state        
         image_state = reshape_image_2d(self.current_image)
 
         if save_image:
@@ -167,28 +166,33 @@ class PublishingSubscriber(Node):
         obs_states = {}
         if image_observation:
             obs_states['custom_image']=image_state                      #image name in dummy PPO: 'calibrated_camera_image'
-        if joint_observation:                                           #as in dummy_PPO. Cant see why this is useful
-            obs_states['robot0_joint_pos']=self.physical_joint_state
-        """
+        #if joint_observation:                                           #as in dummy_PPO. Cant see why this is useful
+        #    obs_states['robot0_joint_pos']=self.physical_joint_state
         if eef_observation:
-            obs_states['robot0_eef_pos']=self.simulated_eef_state 
-        if hight_observation:
-            obs_states['robot0_eef_z']=self.simulated_eef_z_state
+            obs_states['robot0_eef_pos']=self.simulated_eef_pos 
+        #if hight_observation:
+        #    obs_states['robot0_eef_z']=self.simulated_eef_z_state
         if gripper_observation:
-            obs_states['robot0_gripper_state']=self.physical or simulated gripper state.
-        """
+            obs_states['gripper_status']=self.physical_gripper_state #or simulated gripper state.
 
         #Test i joint states from robosuite and physical robot is the same (should be)
         print("physical_joint_state:", self.physical_joint_state)
         print("simulated_joint_state", self.simulated_joint_state, "\n")
-        print("simulated_eef_state", self.simulated_eef_state, "\n")
+        print("simulated_eef_pos", self.simulated_eef_pos, "\n")
        
 
-        #The policy choose the next action (x,y,z,a,b,c) based on the observations
+        #The policy choose the next action (x,y,z,c, g) based on the observations
         chosen_action_pose = self.policy_model.predict(obs_states)
-        print("chosen action pose",chosen_action_pose) 
+        
+        #Add (a,b) = (0,0) in (x,y,z,a,b,c,g)
+        chosen_action = np.insert(chosen_action_pose[0],3,(0,0))
+        #The policy choose the next action (x,y,z,a,b,c) based on the observations
+
+        print("chosen action pose",chosen_action_pose[0]) 
+        print("chosen action pose",np.insert(chosen_action_pose[0],3,(0,0))) 
+
         #Robosuite translates the action (x,y,z,a,b,c) to joint angles (a1,a2,a3,a4,a5,a6,a7)
-        obs = self.robosuite_env.step(chosen_action_pose[0])
+        obs = self.robosuite_env.step(chosen_action)
         self.simulated_joint_state = obs[0]['robot0_joint_pos']
         print("chosen action joints", self.simulated_joint_state)
 
@@ -198,7 +202,7 @@ class PublishingSubscriber(Node):
         test_limits(self.simulated_joint_state)
 
         #Test if the eef_pos can be taken from the robosuite environment
-        self.simulated_eef_state = obs[0]['robot0_eef_pos'] #(x,y,z)
+        self.simulated_eef_pos = obs[0]['robot0_eef_pos'] #(x,y,z)
 
         gripper_msg= GripperPos()
         if float(chosen_action_pose[0][-1]) > 0 :
@@ -229,16 +233,16 @@ class PublishingSubscriber(Node):
     
 # Function that makes a client node, calls a capture signal til the Zivid server and closes the node.
 # Copied from zivid-ros2/zivid_samples/zivid_samples/sample_capture.py
-def capture():
+def capture2D():
     node = rclpy.create_node("zivid_camera_client")
 
-    capture_client = node.create_client(Capture, "/zivid/capture")
+    capture_client = node.create_client(Capture2D, "/zivid/capture_2d")
     while not capture_client.wait_for_service(timeout_sec=1.0):
         print("service not available, waiting again...")
 
-    request = Capture.Request()
+    request = Capture2D.Request()
     future = capture_client.call_async(request)
-    response = Capture.Response()    
+    response = Capture2D.Response()    
     node.destroy_node()    
 
 
@@ -247,9 +251,10 @@ def capture():
 def reshape_image_2d(img):
     new_img = np.reshape(img, (1200,1944,4)) #(1200,1944,4)
     new_img = np.delete(new_img, 3, axis=2) #delete 4th dimension
-    #new_img = cv2.resize(new_img, dsize=(256, 256), interpolation=cv2.INTER_CUBIC)
-    #new_img = new_img[0:1200, 372:1572]
-    new_img = cv2.resize(new_img, dsize=(486, 300), interpolation=cv2.INTER_CUBIC) #USE WITH CAUTION, may interferre with the pixel size
+
+    print(new_img.shape)
+    new_img = new_img[0:1200, 300:1500] #h,w
+    new_img = cv2.resize(new_img, dsize=(84, 84), interpolation=cv2.INTER_CUBIC)
     new_img = cv2.rotate(new_img, cv2.ROTATE_180)
 
     return new_img
