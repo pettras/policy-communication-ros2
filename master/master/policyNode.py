@@ -33,8 +33,18 @@ from robosuite.environments.base import register_env
 from robosuite.models.robots.robot_model import register_robot
 
 import cv2
+from PIL import Image as PILImage
 from math import isclose
 np.set_printoptions(formatter={'float': lambda x: "{0:0.4f}".format(x)})
+
+import yaml
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecTransposeImage
+from stable_baselines3.common.vec_env.vec_normalize import VecNormalize
+from src.helper_functions.wrap_env import make_multiprocess_env
+from src.wrapper import GymWrapper_multiinput
+from stable_baselines3.common.monitor import Monitor
+
+from src.helper_functions.camera_functions import adjust_width_of_image
 
 
 image_observation = True
@@ -43,13 +53,13 @@ joint_observation = False
 gripper_observation = True
 
 #images_size = (486, 300)
-save_image = True
+save_image = False
 #crop_image = False
 
 
-test_robot_movement_mode = True
+test_robot_movement_mode = False
 
-policy_model_path = "/home/kukauser/petter/zip_files/best_success_rate" #/home/kukauser/Downloads/dummy_policy_256_256") #/home/kukauser/petter/zip_files/best_model
+policy_model_path = "/home/kukauser/petter/zip_files/36_cpu_best_model" #/home/kukauser/Downloads/dummy_policy_256_256") #/home/kukauser/petter/zip_files/best_model
 
 
 
@@ -113,16 +123,54 @@ class PublishingSubscriber(Node):
         register_env(Lift_edit)
         register_env(Lift_4_objects)
 
-        self.robosuite_env = suite.make(
-            env_name="Lift_edit", # try with other tasks like "Stack" and "Door"
-            robots="IIWA_14",  # try with other robots like "Sawyer" and "Jaco"
-            gripper_types="Robotiq85Gripper_iiwa_14",
-            has_renderer=False,
-            has_offscreen_renderer=False,
-            use_camera_obs=False,
-            use_object_obs=False,
-            controller_configs=load_controller_config(default_controller="OSC_POSE"),
-        )
+        yaml_file = "config_files/" + "ppo_36_par_cpu.yaml"
+        print("you are using this yaml file: ", yaml_file)
+        with open(yaml_file, 'r') as stream:
+            config = yaml.safe_load(stream)
+
+        # Environment specifications
+        env_options = config["robosuite"]
+        if env_options["custom_camera_conversion"]:
+            env_options["camera_widths"] = adjust_width_of_image(env_options["camera_heights"])
+        env_options["custom_camera_trans_matrix"] = np.array(env_options["custom_camera_trans_matrix"])
+        env_id = env_options.pop("env_id")
+
+        # Observations
+        obs_config = config["gymwrapper"]
+        obs_list = obs_config["observations"] 
+        obs_list.append("robot0_joint_pos")
+        smaller_action_space = obs_config["smaller_action_space"]
+        xyz_action_space = obs_config["xyz_action_space"]
+
+        normalize_obs = config['normalize_obs']
+        normalize_rew = config['normalize_rew']
+        norm_obs_keys = config['norm_obs_keys']
+
+        num_procs = 1
+        seed = 0
+        print("add")
+        self.robosuite_env = GymWrapper_multiinput(suite.make(env_id, **env_options), obs_list, smaller_action_space, xyz_action_space) 
+        #make_multiprocess_env(env_id, env_options, obs_list, smaller_action_space, xyz_action_space,  1, seed)
+        self.robosuite_env = Monitor(self.robosuite_env, info_keywords = ("is_success",))
+        self.robosuite_env = DummyVecEnv([lambda : self.robosuite_env])
+        self.robosuite_env = VecTransposeImage(self.robosuite_env)
+
+        print("skal")
+        if normalize_obs or normalize_rew:
+            self.robosuite_env = VecNormalize(self.robosuite_env, norm_obs=normalize_obs,norm_reward=normalize_rew,norm_obs_keys=norm_obs_keys)
+
+        print("her")
+        self.robosuite_env.training = False
+        # self.robosuite_env = suite.make(
+        #     env_name="Lift_edit", # try with other tasks like "Stack" and "Door"
+        #     robots="IIWA_14",  # try with other robots like "Sawyer" and "Jaco"
+        #     gripper_types="Robotiq85Gripper_iiwa_14",
+        #     has_renderer=False,
+        #     has_offscreen_renderer=False,
+        #     use_camera_obs=False,
+        #     use_object_obs=False,
+        #     controller_configs=load_controller_config(default_controller="OSC_POSE"),
+        # )
 
 
         
@@ -181,23 +229,35 @@ class PublishingSubscriber(Node):
         print("simulated_eef_pos", self.simulated_eef_pos, "\n")
        
 
-        #The policy choose the next action (x,y,z,c, g) based on the observations
+        #The policy choose the next action (x,y,z,c,g) based on the observations
         chosen_action_pose = self.policy_model.predict(obs_states)
         
+        
+
+        #if chosen_action_pose.size() == 2:
+            
+        #print ("HALLA",chosen_action_pose.type)
         #Add (a,b) = (0,0) in (x,y,z,a,b,c,g)
-        chosen_action = np.insert(chosen_action_pose[0],3,(0,0))
+        #chosen_action = np.insert(chosen_action_pose[0],3,(0,0))
         #The policy choose the next action (x,y,z,a,b,c) based on the observations
 
         print("chosen action pose",chosen_action_pose[0]) 
         print("chosen action pose",np.insert(chosen_action_pose[0],3,(0,0))) 
-
+        print("lennnngdeded", len(chosen_action_pose[0]))
+        
+        if len(chosen_action_pose[0]) != 5:
+            chosen_action_pose = chosen_action_pose[0]
         #Robosuite translates the action (x,y,z,a,b,c) to joint angles (a1,a2,a3,a4,a5,a6,a7)
-        obs = self.robosuite_env.step(chosen_action)
-        self.simulated_joint_state = obs[0]['robot0_joint_pos']
-        print("chosen action joints", self.simulated_joint_state)
+        self.robosuite_env.reset()
+        #self.robosuite_env.render()
+        obs = self.robosuite_env.step(chosen_action_pose)
+
+        print("OBSSSS", obs)
+        self.simulated_joint_state = obs[0]['robot0_joint_pos'][0]
+        print("chosen action joints", self.simulated_joint_state[0])
 
         if test_robot_movement_mode:
-            self.simulated_joint_state[3] = -1.5
+            self.simulated_joint_state[3] = -1
         
         test_limits(self.simulated_joint_state)
 
@@ -211,13 +271,13 @@ class PublishingSubscriber(Node):
             gripper_msg.pos = 0.0 #open gripper
 
         robot_msg = JointPosition()
-        robot_msg.position.a1 = self.simulated_joint_state[0] #joint action taken from robosuite
-        robot_msg.position.a2 = self.simulated_joint_state[1]
-        robot_msg.position.a3 = self.simulated_joint_state[2]
-        robot_msg.position.a4 = self.simulated_joint_state[3]
-        robot_msg.position.a5 = self.simulated_joint_state[4]
-        robot_msg.position.a6 = self.simulated_joint_state[5]
-        robot_msg.position.a7 = self.simulated_joint_state[6]
+        robot_msg.position.a1 = float(self.simulated_joint_state[0]) #joint action taken from robosuite
+        robot_msg.position.a2 = float(self.simulated_joint_state[1])
+        robot_msg.position.a3 = float(self.simulated_joint_state[2])
+        robot_msg.position.a4 = float(self.simulated_joint_state[3])
+        robot_msg.position.a5 = float(self.simulated_joint_state[4])
+        robot_msg.position.a6 = float(self.simulated_joint_state[5])
+        robot_msg.position.a7 = float(self.simulated_joint_state[6])
         #print("test1", self.simulated_joint_state[0].dtype)
 
 
@@ -255,7 +315,16 @@ def reshape_image_2d(img):
     print(new_img.shape)
     new_img = new_img[0:1200, 300:1500] #h,w
     new_img = cv2.resize(new_img, dsize=(84, 84), interpolation=cv2.INTER_CUBIC)
-    new_img = cv2.rotate(new_img, cv2.ROTATE_180)
+    new_img = cv2.flip(new_img, 0)
+    #new_img = cv2.normalize(imageread, resultimage, 0, 100, cv.NORM_MINMAX)
+
+    new_img = np.transpose(new_img, (2, 0, 1))
+    print("SHAPE", new_img.shape)
+
+    #test
+    img = np.transpose(new_img, (2, 0, 1))
+    img = PILImage.fromarray(img, 'RGB')
+    img.save('/home/kukauser/Downloads/k2.png')
 
     return new_img
 
