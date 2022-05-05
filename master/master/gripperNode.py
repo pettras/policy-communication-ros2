@@ -10,6 +10,7 @@ import time
 from robotiq_modbus_controller.driver import RobotiqModbusRtuDriver
 
 
+
 class PublishingSubscriber(Node):
 
     def __init__(self):
@@ -39,13 +40,16 @@ class PublishingSubscriber(Node):
         time.sleep(2) # A pause to make sure that the gripper is fully reset before getting a command
 
     def listener_callback(self, msg): # Member function that handles the use of gripper_pos information
-        
-        if msg.pos==1: #close gripper
-            self.current_pos_request = 255
-        else: #open gripper
-            self.current_pos_request = 0 
+        self.current_pos_request = int((msg.pos + 1) * 90) #90 gives the gripper an offset when closed. 128 would remove this offset
+
+        #Code for descrete movement
+        #if msg.pos==1: #close gripper
+        #    self.current_pos_request = 255
+        #else: #open gripper
+        #    self.current_pos_request = 0 
 
         self.driver.move(pos = self.current_pos_request, speed = 200, force = 10)
+        self.get_logger().info('Heard: "%s"' % msg)
             
     def talker_callback(self): # Member function that makes the gripper_status information
         assert self.driver.status().fault_status.flt == 0, f"Error message from gripper 'flt'={self.driver.status().fault_status.flt}. See documentation"
@@ -65,7 +69,7 @@ class PublishingSubscriber(Node):
 
   
         self.publisher_.publish(msg)
-        self.get_logger().info('Publishing: "%s"' % msg)
+        #self.get_logger().info('Publishing: "%s"' % msg)
 
 
 

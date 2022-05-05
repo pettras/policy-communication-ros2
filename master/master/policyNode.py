@@ -50,8 +50,8 @@ from src.helper_functions.camera_functions import adjust_width_of_image
 image_observation = True
 eef_observation = True
 joint_observation = False
-gripper_observation = True
-
+gripper_observation_sim = True
+gripper_observation_phy = False
 #images_size = (486, 300)
 save_image = False
 #crop_image = False
@@ -110,6 +110,7 @@ class PublishingSubscriber(Node):
         self.simulated_joint_state = np.zeros(7)
         self.physical_joint_state = np.zeros(7)
         self.physical_gripper_state = 0
+        self.simulated_gripper_state = 0
         self.first_runthrough=1
         #Should have a simulated_gripper_state
 
@@ -181,6 +182,7 @@ class PublishingSubscriber(Node):
 
         if (np.allclose(self.simulated_joint_state, self.physical_joint_state, atol=0.0001) and self.gripper_movement==0 ) or self.first_runthrough==1:#check that the robot is not moving
             self.capture_image()
+            time.sleep(1) #To recieve the image before running the set_new_goal function
             self.set_new_goal()
 
 
@@ -214,14 +216,14 @@ class PublishingSubscriber(Node):
         obs_states = {}
         if image_observation:
             obs_states['custom_image']=image_state                      #image name in dummy PPO: 'calibrated_camera_image'
-        #if joint_observation:                                           #as in dummy_PPO. Cant see why this is useful
-        #    obs_states['robot0_joint_pos']=self.physical_joint_state
+        if joint_observation:                                           #as in dummy_PPO. 
+            obs_states['robot0_joint_pos']=self.physical_joint_state
         if eef_observation:
             obs_states['robot0_eef_pos']=self.simulated_eef_pos 
-        #if hight_observation:
-        #    obs_states['robot0_eef_z']=self.simulated_eef_z_state
-        if gripper_observation:
-            obs_states['gripper_status']=self.physical_gripper_state #or simulated gripper state.
+        if gripper_observation_sim:
+            obs_states['gripper_status']=self.simulated_gripper_state 
+        if gripper_observation_phy:
+            obs_states['gripper_status']=self.physical_gripper_state 
 
         #Test i joint states from robosuite and physical robot is the same (should be)
         print("physical_joint_state:", self.physical_joint_state)
@@ -232,20 +234,16 @@ class PublishingSubscriber(Node):
         #The policy choose the next action (x,y,z,c,g) based on the observations
         chosen_action_pose = self.policy_model.predict(obs_states)
         
-        
+        print("chosen action pose",chosen_action_pose[0]) 
 
-        #if chosen_action_pose.size() == 2:
-            
+         
         #print ("HALLA",chosen_action_pose.type)
         #Add (a,b) = (0,0) in (x,y,z,a,b,c,g)
         #chosen_action = np.insert(chosen_action_pose[0],3,(0,0))
         #The policy choose the next action (x,y,z,a,b,c) based on the observations
 
-        print("chosen action pose",chosen_action_pose[0]) 
-        print("chosen action pose",np.insert(chosen_action_pose[0],3,(0,0))) 
-        print("lennnngdeded", len(chosen_action_pose[0]))
         
-        if len(chosen_action_pose[0]) != 5:
+        if len(chosen_action_pose[0]) != 5: #check if chosen_action_pose[0] is on the right form
             chosen_action_pose = chosen_action_pose[0]
         #Robosuite translates the action (x,y,z,a,b,c) to joint angles (a1,a2,a3,a4,a5,a6,a7)
         self.robosuite_env.reset()
@@ -263,12 +261,14 @@ class PublishingSubscriber(Node):
 
         #Test if the eef_pos can be taken from the robosuite environment
         self.simulated_eef_pos = obs[0]['robot0_eef_pos'] #(x,y,z)
+        self.simulated_gripper_state =  obs[0]['gripper_status']
 
         gripper_msg= GripperPos()
-        if float(chosen_action_pose[0][-1]) > 0 :
-            gripper_msg.pos = 1.0 #close gripper
-        else:
-            gripper_msg.pos = 0.0 #open gripper
+        gripper_msg.pos = chosen_action_pose[0][-1]
+        #if float(chosen_action_pose[0][-1]) > 0 :
+        #    gripper_msg.pos = 1.0 #close gripper
+        #else:
+        #    gripper_msg.pos = 0.0 #open gripper
 
         robot_msg = JointPosition()
         robot_msg.position.a1 = float(self.simulated_joint_state[0]) #joint action taken from robosuite
@@ -360,3 +360,7 @@ if __name__ == '__main__':
 
 #funksjon for start position?
 #sett på en sleep et sted for å sjekke om man har flere tråder
+
+#-0.017 0.871 0.020 -1.640 0.043 0.432 -0.054 
+#-0.97 49.90 -1.15 -93.97 2.46 24.75 -3.09
+#
