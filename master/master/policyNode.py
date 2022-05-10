@@ -24,8 +24,8 @@ import matplotlib.pyplot as plt
 
 import sys
 sys.path.insert(0, '/home/kukauser/Robot_Learning_master/code')
-from src.models.robots.manipulators.iiwa_14_robot import IIWA_14
-from src.models.grippers.robotiq_85_iiwa_14_gripper import Robotiq85Gripper_iiwa_14
+from src.models.robots.manipulators.iiwa_14_robot import IIWA_14, IIWA_14_modified_flange
+from src.models.grippers.robotiq_85_iiwa_14_gripper import Robotiq85Gripper_iiwa_14, Robotiq85Gripper_iiwa_14_longer_finger
 from src.helper_functions.register_new_models import register_gripper, register_robot_class_mapping
 from src.environments import Lift_4_objects, Lift_edit
 
@@ -47,20 +47,20 @@ from stable_baselines3.common.monitor import Monitor
 from src.helper_functions.camera_functions import adjust_width_of_image
 
 
+
 image_observation = True
 eef_observation = True
 joint_observation = False
 gripper_observation_sim = True
 gripper_observation_phy = False
 #images_size = (486, 300)
-save_image = False
+save_image = True
 #crop_image = False
 
 
-test_robot_movement_mode = False
-
-policy_model_path = "/home/kukauser/petter/zip_files/36_cpu_best_model" #/home/kukauser/Downloads/dummy_policy_256_256") #/home/kukauser/petter/zip_files/best_model
-
+#policy_model_path = "/home/kukauser/petter/zip_files/36_cpu_best_model" #/home/kukauser/Downloads/dummy_policy_256_256") #/home/kukauser/petter/zip_files/best_model
+policy_model_path = "/home/kukauser/petter/zip_files/logs_modified_gripper_length_new/best_success_rate"
+load_vecnormalize_path = "/home/kukauser/petter/zip_files/logs_modified_gripper_length_new/vec_normalize_best_success_rate.pkl"
 
 
 class PublishingSubscriber(Node):
@@ -73,7 +73,8 @@ class PublishingSubscriber(Node):
             GripperStatus,                              #interface name from master_interfaces.msg
             'gripper_status',                           #topic name
             self.gripper_current_status,             #callback function
-            1)                                          #queue size
+            1,                                          #queue size
+            )                                          
         
         #Subscribe to robot
         self.subscription_robot = self.create_subscription(
@@ -89,6 +90,9 @@ class PublishingSubscriber(Node):
             self.zivid_image_callback,
             1)
         self.current_image = np.zeros([1200,1944,4], dtype=np.uint8)
+        
+
+
 
         #Prevent unused variable warning
         self.subscription_gripper  
@@ -112,19 +116,21 @@ class PublishingSubscriber(Node):
         self.physical_gripper_state = 0
         self.simulated_gripper_state = 0
         self.first_runthrough=1
-        #Should have a simulated_gripper_state
 
         #Load trained model
         self.policy_model=PPO.load(policy_model_path)
 
         #Set up the Robosuite environment
         register_robot(IIWA_14)
+        register_robot(IIWA_14_modified_flange)
         register_gripper(Robotiq85Gripper_iiwa_14)
+        register_gripper(Robotiq85Gripper_iiwa_14_longer_finger)
         register_robot_class_mapping("IIWA_14")
+        register_robot_class_mapping("IIWA_14_modified_flange")
         register_env(Lift_edit)
         register_env(Lift_4_objects)
 
-        yaml_file = "config_files/" + "ppo_36_par_cpu.yaml"
+        yaml_file = "config_files/" + "ppo_modified_length_gripper.yaml"
         print("you are using this yaml file: ", yaml_file)
         with open(yaml_file, 'r') as stream:
             config = yaml.safe_load(stream)
@@ -149,41 +155,44 @@ class PublishingSubscriber(Node):
 
         num_procs = 1
         seed = 0
-        print("add")
+
         self.robosuite_env = GymWrapper_multiinput(suite.make(env_id, **env_options), obs_list, smaller_action_space, xyz_action_space) 
         #make_multiprocess_env(env_id, env_options, obs_list, smaller_action_space, xyz_action_space,  1, seed)
         self.robosuite_env = Monitor(self.robosuite_env, info_keywords = ("is_success",))
         self.robosuite_env = DummyVecEnv([lambda : self.robosuite_env])
         self.robosuite_env = VecTransposeImage(self.robosuite_env)
 
-        print("skal")
         if normalize_obs or normalize_rew:
-            self.robosuite_env = VecNormalize(self.robosuite_env, norm_obs=normalize_obs,norm_reward=normalize_rew,norm_obs_keys=norm_obs_keys)
+            self.robosuite_env = VecNormalize.load(load_vecnormalize_path, self.robosuite_env)
+            #self.robosuite_env = VecNormalize(self.robosuite_env, norm_obs=normalize_obs,norm_reward=normalize_rew,norm_obs_keys=norm_obs_keys)
 
-        print("her")
         self.robosuite_env.training = False
-        # self.robosuite_env = suite.make(
-        #     env_name="Lift_edit", # try with other tasks like "Stack" and "Door"
-        #     robots="IIWA_14",  # try with other robots like "Sawyer" and "Jaco"
-        #     gripper_types="Robotiq85Gripper_iiwa_14",
-        #     has_renderer=False,
-        #     has_offscreen_renderer=False,
-        #     use_camera_obs=False,
-        #     use_object_obs=False,
-        #     controller_configs=load_controller_config(default_controller="OSC_POSE"),
-        # )
+        self.robosuite_env.reset()
+        print("Environment built")
+        gripper_init_msg= GripperPos()
+        gripper_init_msg.pos = -1.0
+        for i in range(4):
+            self.publisher_gripper.publish(gripper_init_msg)
+            time.sleep(0.1)
+
+    def zivid_image_callback(self, msg):
+        self.current_image = msg.data
+        print("Recieved image")
+
+        self.set_new_goal() #When the image is revieved we set a new goal for the robot and gripper
 
 
-        
     def check_movement(self):
 
         print("TEST: phy", self.simulated_joint_state)
         print("TEST: sim", self.physical_joint_state)
 
-        if (np.allclose(self.simulated_joint_state, self.physical_joint_state, atol=0.0001) and self.gripper_movement==0 ) or self.first_runthrough==1:#check that the robot is not moving
+
+        if (np.allclose(self.simulated_joint_state, self.physical_joint_state, atol=0.0001) 
+        and self.gripper_movement==0 or self.first_runthrough==1):#check that the robot is not moving
             self.capture_image()
-            time.sleep(1) #To recieve the image before running the set_new_goal function
-            self.set_new_goal()
+            #time.sleep(0.5) #To recieve the image before running the set_new_goal function
+            
 
 
     def capture_image(self):
@@ -192,7 +201,7 @@ class PublishingSubscriber(Node):
     def gripper_current_status(self, msg): #gripper_callback
         self.physical_gripper_state = float(msg.closed)
         self.gripper_movement = msg.movement
-        #self.get_logger().info('I heard: "%s"' % msg)
+        #self.get_logger().info('I heard-----: "%s"' % msg)
 
 
     def robot_current_status(self, msg): #full_callback
@@ -201,16 +210,12 @@ class PublishingSubscriber(Node):
         self.physical_joint_state = msg_vector
         
     
-    def zivid_image_callback(self, msg):
-        self.current_image = msg.data
 
 
         
     def set_new_goal(self): 
         image_state = reshape_image_2d(self.current_image)
 
-        if save_image:
-            k = cv2.imwrite(r'/home/kukauser/Downloads/k.png', cv2.cvtColor(image_state,cv2.COLOR_RGB2BGR))
         
         #OBSERVATION SPACE
         obs_states = {}
@@ -233,20 +238,17 @@ class PublishingSubscriber(Node):
 
         #The policy choose the next action (x,y,z,c,g) based on the observations
         chosen_action_pose = self.policy_model.predict(obs_states)
-        
         print("chosen action pose",chosen_action_pose[0]) 
-
-         
-        #print ("HALLA",chosen_action_pose.type)
-        #Add (a,b) = (0,0) in (x,y,z,a,b,c,g)
-        #chosen_action = np.insert(chosen_action_pose[0],3,(0,0))
-        #The policy choose the next action (x,y,z,a,b,c) based on the observations
+        
+        #Test for different actions:
+        """chosen_action_pose = np.array([[0.0, 0.0, 0.0, 0.2, 0.0]])
+        print("chosen action pose",chosen_action_pose[0])""" 
 
         
         if len(chosen_action_pose[0]) != 5: #check if chosen_action_pose[0] is on the right form
             chosen_action_pose = chosen_action_pose[0]
+        
         #Robosuite translates the action (x,y,z,a,b,c) to joint angles (a1,a2,a3,a4,a5,a6,a7)
-        self.robosuite_env.reset()
         #self.robosuite_env.render()
         obs = self.robosuite_env.step(chosen_action_pose)
 
@@ -254,21 +256,19 @@ class PublishingSubscriber(Node):
         self.simulated_joint_state = obs[0]['robot0_joint_pos'][0]
         print("chosen action joints", self.simulated_joint_state[0])
 
-        if test_robot_movement_mode:
-            self.simulated_joint_state[3] = -1
         
         test_limits(self.simulated_joint_state)
 
         #Test if the eef_pos can be taken from the robosuite environment
         self.simulated_eef_pos = obs[0]['robot0_eef_pos'] #(x,y,z)
         self.simulated_gripper_state =  obs[0]['gripper_status']
-
+        #print("Gripper", self.simulated_gripper_state)
+        
+        #print("TYPE", type(self.simulated_gripper_state[0]))
+        #print("Message to gripper ------", float(chosen_action_pose[0][-1]))
         gripper_msg= GripperPos()
-        gripper_msg.pos = chosen_action_pose[0][-1]
-        #if float(chosen_action_pose[0][-1]) > 0 :
-        #    gripper_msg.pos = 1.0 #close gripper
-        #else:
-        #    gripper_msg.pos = 0.0 #open gripper
+        gripper_msg.pos = float(chosen_action_pose[0][-1])
+
 
         robot_msg = JointPosition()
         robot_msg.position.a1 = float(self.simulated_joint_state[0]) #joint action taken from robosuite
@@ -318,6 +318,15 @@ def reshape_image_2d(img):
     new_img = cv2.flip(new_img, 0)
     #new_img = cv2.normalize(imageread, resultimage, 0, 100, cv.NORM_MINMAX)
 
+
+    #print("Before divide ------", new_img)
+    #new_img = new_img / 255.0
+    #img_float32 = np.float32(new_img)
+    #lab_image = cv2.cvtColor(img_float32, cv2.COLOR_RGB2HSV)
+    #print("After divide ---------", new_img)
+    if save_image:
+       k = cv2.imwrite(r'/home/kukauser/Downloads/k.png', cv2.cvtColor(new_img, cv2.COLOR_RGB2BGR))
+    
     new_img = np.transpose(new_img, (2, 0, 1))
     print("SHAPE", new_img.shape)
 
@@ -335,7 +344,7 @@ def test_limits(joint_angles):
     assert -1.9 < joint_angles[3] < 1.9, "Joint 4 out of bounds"
     assert -2.9 < joint_angles[4] < 2.9, "Joint 5 out of bounds"
     assert -1.9 < joint_angles[5] < 1.9, "Joint 6 out of bounds"
-    assert -2.9 < joint_angles[6] < 2.9, "Joint 7 out of bounds"
+    assert -1.83 < joint_angles[6] < 1.83, "Joint 7 out of bounds"  #should be -2.9 < joint_angles[6] < 2.0, but the robot is out of bounds at 110 degrees.
 
 
 def main(args=None):

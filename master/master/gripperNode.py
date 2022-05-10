@@ -8,7 +8,7 @@ from master_interfaces.msg import GripperPos                           # CHANGE
 
 import time
 from robotiq_modbus_controller.driver import RobotiqModbusRtuDriver
-
+import numpy as np
 
 
 class PublishingSubscriber(Node):
@@ -39,8 +39,23 @@ class PublishingSubscriber(Node):
         print("activate")
         time.sleep(2) # A pause to make sure that the gripper is fully reset before getting a command
 
+        self.clipped_action = -1
+
+
     def listener_callback(self, msg): # Member function that handles the use of gripper_pos information
-        self.current_pos_request = int((msg.pos + 1) * 90) #90 gives the gripper an offset when closed. 128 would remove this offset
+
+
+        self.clipped_action = np.clip(self.clipped_action + 0.5 * np.sign(msg.pos), -1.0, 1.0)
+        print(msg.pos)
+        print("Current clipped ------", self.clipped_action)
+        if (msg.pos > 1):
+            print("Request over 1:", msg.pos)
+        if (msg.pos < -1):
+            print("Request under -1:", msg.pos)        
+        
+        
+        self.current_pos_request = int((self.clipped_action + 1) * 90) #90 gives the gripper an offset when closed. 128 would remove this offset
+       
 
         #Code for descrete movement
         #if msg.pos==1: #close gripper
@@ -48,7 +63,7 @@ class PublishingSubscriber(Node):
         #else: #open gripper
         #    self.current_pos_request = 0 
 
-        self.driver.move(pos = self.current_pos_request, speed = 200, force = 10)
+        self.driver.move(pos = self.current_pos_request, speed = 200, force = 1)
         self.get_logger().info('Heard: "%s"' % msg)
             
     def talker_callback(self): # Member function that makes the gripper_status information
@@ -62,7 +77,7 @@ class PublishingSubscriber(Node):
         else:
             msg.closed = 1
             
-        if self.driver.status().current.cu !=0:
+        if self.driver.status().gripper_status.obj ==0:
             msg.movement = 1
         else:
             msg.movement = 0
