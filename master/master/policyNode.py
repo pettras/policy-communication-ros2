@@ -59,9 +59,15 @@ save_image = True
 
 
 #policy_model_path = "/home/kukauser/petter/zip_files/36_cpu_best_model" #/home/kukauser/Downloads/dummy_policy_256_256") #/home/kukauser/petter/zip_files/best_model
-policy_model_path = "/home/kukauser/petter/zip_files/logs_modified_gripper_length_new/best_success_rate"
-load_vecnormalize_path = "/home/kukauser/petter/zip_files/logs_modified_gripper_length_new/vec_normalize_best_success_rate.pkl"
+#policy_model_path = "/home/kukauser/petter/zip_files/logs_modified_gripper_length_new/best_success_rate"
+#load_vecnormalize_path = "/home/kukauser/petter/zip_files/logs_modified_gripper_length_new/vec_normalize_best_success_rate.pkl"
 
+policy_model_path = "/home/kukauser/petter/zip_files/logs_modified_gripper_length_2times_more/best_model"
+load_vecnormalize_path = "/home/kukauser/petter/zip_files/logs_modified_gripper_length_2times_more/vec_normalize_best_model.pkl"
+
+
+#policy_model_path = "/home/kukauser/petter/zip_files/logs_modified_doamin_rand_3times_more/best_model"
+#load_vecnormalize_path = "/home/kukauser/petter/zip_files/logs_modified_doamin_rand_3times_more/vec_normalize_best_model.pkl"
 
 class PublishingSubscriber(Node):
 
@@ -130,7 +136,7 @@ class PublishingSubscriber(Node):
         register_env(Lift_edit)
         register_env(Lift_4_objects)
 
-        yaml_file = "config_files/" + "ppo_modified_length_gripper.yaml"
+        yaml_file = "config_files/" + "ppo_modified_length_gripper_2times_more.yaml"
         print("you are using this yaml file: ", yaml_file)
         with open(yaml_file, 'r') as stream:
             config = yaml.safe_load(stream)
@@ -313,7 +319,7 @@ def reshape_image_2d(img):
     new_img = np.delete(new_img, 3, axis=2) #delete 4th dimension
 
     print(new_img.shape)
-    new_img = new_img[0:1200, 300:1500] #h,w
+    new_img = new_img[0:1200, 175:1375] #h,w
     new_img = cv2.resize(new_img, dsize=(84, 84), interpolation=cv2.INTER_CUBIC)
     new_img = cv2.flip(new_img, 0)
     #new_img = cv2.normalize(imageread, resultimage, 0, 100, cv.NORM_MINMAX)
@@ -325,7 +331,8 @@ def reshape_image_2d(img):
     #lab_image = cv2.cvtColor(img_float32, cv2.COLOR_RGB2HSV)
     #print("After divide ---------", new_img)
     if save_image:
-       k = cv2.imwrite(r'/home/kukauser/Downloads/k.png', cv2.cvtColor(new_img, cv2.COLOR_RGB2BGR))
+        print_img = cv2.rotate(new_img, cv2.cv2.ROTATE_180)
+        k = cv2.imwrite(r'/home/kukauser/Downloads/k.png', cv2.cvtColor(print_img, cv2.COLOR_RGB2BGR))
     
     new_img = np.transpose(new_img, (2, 0, 1))
     print("SHAPE", new_img.shape)
