@@ -55,7 +55,7 @@ joint_observation = False
 gripper_observation_sim = True
 gripper_observation_phy = False
 #images_size = (486, 300)
-save_image = False
+save_image = True
 #crop_image = False
 
 
@@ -63,8 +63,8 @@ save_image = False
 #policy_model_path = "/home/kukauser/petter/zip_files/logs_modified_gripper_length_new/best_success_rate"
 #load_vecnormalize_path = "/home/kukauser/petter/zip_files/logs_modified_gripper_length_new/vec_normalize_best_success_rate.pkl"
 
-policy_model_path = "/home/kukauser/petter/zip_files/manulab_testing/calibrated_xyz_domain_rand/best_model"
-load_vecnormalize_path = "/home/kukauser/petter/zip_files/manulab_testing/calibrated_xyz_domain_rand/vec_normalize_best_model.pkl"
+policy_model_path = "/home/kukauser/petter/zip_files/manulab_testing/custom_camera_domain_rand/best_model"
+load_vecnormalize_path = "/home/kukauser/petter/zip_files/manulab_testing/custom_camera_domain_rand/vec_normalize_best_model.pkl"
 
 #policy_model_path = "/home/kukauser/petter/zip_files/logs_modified_doamin_rand_3times_more/best_model"
 #load_vecnormalize_path = "/home/kukauser/petter/zip_files/logs_modified_doamin_rand_3times_more/vec_normalize_best_model.pkl"
@@ -139,7 +139,7 @@ class PublishingSubscriber(Node):
         register_env(Lift_edit)
         register_env(Lift_4_objects)
 
-        yaml_file = "config_files/" +  "ppo_calibrated_xyz_domain_rand.yaml"
+        yaml_file = "config_files/" +  "ppo_modified_gripper_length_domain_rand.yaml"
         print("you are using this yaml file: ", yaml_file)
         with open(yaml_file, 'r') as stream:
             config = yaml.safe_load(stream)
@@ -342,9 +342,14 @@ def reshape_image_2d(img):
     #img_float32 = np.float32(new_img)
     #lab_image = cv2.cvtColor(img_float32, cv2.COLOR_RGB2HSV)
     #print("After divide ---------", new_img)
+
     if save_image:
-        print_img = cv2.rotate(new_img, cv2.cv2.ROTATE_180)
-        k = cv2.imwrite(r'/home/kukauser/Downloads/k.png', cv2.cvtColor(new_img, cv2.COLOR_RGB2BGR))
+        print_img = cv2.flip(new_img, 0)
+        print_img2 = np.reshape(img, (1200,1944,4)) #(1200,1944,4)
+        print_img2 = np.delete(print_img2, 3, axis=2) #delete 4th dimension
+
+        k = cv2.imwrite(r'/home/kukauser/Downloads/test_obs.png', cv2.cvtColor(print_img, cv2.COLOR_RGB2BGR))
+        l = cv2.imwrite(r'/home/kukauser/Downloads/test_env.png', cv2.cvtColor(print_img2, cv2.COLOR_RGB2BGR))
     
     new_img = np.transpose(new_img, (2, 0, 1))
     #print("SHAPE", new_img.shape)
