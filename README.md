@@ -1,4 +1,4 @@
-# policy-test-ros2
+# policy-communication-ros2
 
 ## Run
 
